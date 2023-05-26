@@ -9,9 +9,5 @@ lazy val root = project
     scalaVersion := scala3Version,
 
     libraryDependencies += "org.scalameta" %% "munit" % "0.7.29" % Test,
-    libraryDependencies += "com.github.t3hnar" %% "scala-bcrypt" % "4.3.1",
-    libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.4",
-    libraryDependencies += "commons-validator" % "commons-validator" % "1.7"
+    libraryDependencies += "com.github.t3hnar" %% "scala-bcrypt" % "4.3.1" cross CrossVersion.for3Use2_13
   )
-
-  

@@ -41,7 +41,7 @@ object User {
     * @return
     *   true if the username is valid, false otherwise
     */
-  private def isValidUsername(username: String): Boolean =
+  private[data] def isValidUsername(username: String): Boolean =
     username.nonEmpty && username.length >= 3
 
   /** Checks if a password is valid.
@@ -51,7 +51,7 @@ object User {
     * @return
     *   true if the password is valid, false otherwise
     */
-  private def isValidPassword(password: String): Boolean =
+  private[data] def isValidPassword(password: String): Boolean =
     password.nonEmpty &&
       password.length >= 8 &&
       password.exists(_.isUpper) &&
@@ -66,9 +66,9 @@ object User {
     * @return
     *   true if the email is valid, false otherwise
     */
-  private def isValidEmail(email: String): Boolean =
+  private[data] def isValidEmail(email: String): Boolean =
     emailValidator.isValid(email)
-
+    
   /** Creates a new user.
     *
     * @param id
