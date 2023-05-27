@@ -21,7 +21,7 @@ class UserTable(tag: Tag) extends Table[User](tag, "users") {
   /** The user's salt column. */
   def salt = column[String]("salt", O.NotNull)
 
-  /** The user's email column. */
+  /** The user's email column.s */
   def email = column[String]("email", O.NotNull)
 
   /** The mapping of the user's data to the table's columns. */

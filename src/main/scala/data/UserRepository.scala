@@ -95,3 +95,6 @@ case object UserNotFound extends RepositoryError
 
 /** A case object representing an error where a username is already taken. */
 case object UsernameTaken extends RepositoryError
+
+/** A case object representing an error where an email is already taken. */
+case object EmailTaken extends RepositoryError

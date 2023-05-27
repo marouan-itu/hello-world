@@ -1,6 +1,9 @@
 package data
 
 import org.apache.commons.validator.routines.EmailValidator
+import scala.concurrent.Future
+import io.github.nremond.SecureHash
+import java.security.SecureRandom
 
 /** Represents a validation error for a user's data. */
 sealed trait ValidationError
@@ -16,8 +19,6 @@ case object InvalidEmail extends ValidationError
   *   the user's username
   * @param password
   *   the user's password (private)
-  * @param salt
-  *   the user's salt for password hashing (private)
   * @param email
   *   the user's email
   */
@@ -25,10 +26,19 @@ class User private (
     val id: Int,
     val username: String,
     private val password: String,
-    private val salt: String,
     val email: String
 ) {
-  override def toString: String = s"User($id, $username, ****, ****, $email)"
+  override def toString: String = s"User($id, $username, ****, $email)"
+
+  /** Verifies if the provided password matches the user's password.
+    *
+    * @param password
+    *   the password to verify
+    * @return
+    *   true if the password is correct, false otherwise
+    */
+  def verifyPassword(password: String): Boolean =
+    SecureHash.validatePassword(password, this.password)
 }
 
 object User {
@@ -41,7 +51,7 @@ object User {
     * @return
     *   true if the username is valid, false otherwise
     */
-  private[data] def isValidUsername(username: String): Boolean =
+  def isValidUsername(username: String): Boolean =
     username.nonEmpty && username.length >= 3
 
   /** Checks if a password is valid.
@@ -51,7 +61,7 @@ object User {
     * @return
     *   true if the password is valid, false otherwise
     */
-  private[data] def isValidPassword(password: String): Boolean =
+  def isValidPassword(password: String): Boolean =
     password.nonEmpty &&
       password.length >= 8 &&
       password.exists(_.isUpper) &&
@@ -66,9 +76,9 @@ object User {
     * @return
     *   true if the email is valid, false otherwise
     */
-  private[data] def isValidEmail(email: String): Boolean =
+  def isValidEmail(email: String): Boolean =
     emailValidator.isValid(email)
-    
+
   /** Creates a new user.
     *
     * @param id
@@ -77,20 +87,18 @@ object User {
     *   the user's username
     * @param password
     *   the user's password
-    * @param salt
-    *   the user's salt for password hashing
     * @param email
     *   the user's email
     * @return
-    *   the created user, or a validation error if the user's data is invalid
+    *   a Future that either contains the created user, or a validation error if
+    *   the user's data is invalid
     */
   def create(
       id: Int,
       username: String,
       password: String,
-      salt: String,
       email: String
-  ): Either[ValidationError, User] = {
+  ): Future[Either[ValidationError, User]] = Future {
     if (!isValidUsername(username)) {
       Left(InvalidUsername)
     } else if (!isValidPassword(password)) {
@@ -98,7 +106,16 @@ object User {
     } else if (!isValidEmail(email)) {
       Left(InvalidEmail)
     } else {
-      Right(new User(id, username, password, salt, email))
+      val salt = generateSalt()
+      val hashedPassword = SecureHash.createHash(password, salt)
+      Right(new User(id, username, hashedPassword, email))
     }
+  }
+
+  private def generateSalt(): String = {
+    val random = new SecureRandom()
+    val bytes = new Array[Byte](64)
+    random.nextBytes(bytes)
+    bytes.map("%02x".format(_)).mkString
   }
 }

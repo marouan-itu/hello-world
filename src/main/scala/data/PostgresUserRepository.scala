@@ -1,139 +1,139 @@
 package data
 
 import scala.concurrent.{ExecutionContext, Future}
-import com.github.t3hnar.bcrypt._
+import io.github.nremond.SecureHash
 import slick.jdbc.PostgresProfile.api._
 import com.typesafe.scalalogging.LazyLogging
+import slick.SlickException
 
-/** A repository for performing operations on users using a PostgreSQL database.
-  *
-  * @param db
-  *   the database connection
-  * @param ec
-  *   the execution context for asynchronous operations
-  */
 class PostgresUserRepository(db: Database)(implicit ec: ExecutionContext)
     extends UserRepository
     with LazyLogging {
   import UserTable._
 
-  /** Hashes a password with a salt using bcrypt.
-    *
-    * @param password
-    *   the password to hash
-    * @param salt
-    *   the salt to use for hashing
-    * @return
-    *   the hashed password
-    */
-  private def hashPassword(password: String, salt: String): String =
-    (password + salt).bcryptBounded
+  private def runDbAction[T](
+      action: DBIO[T],
+      logMessage: String,
+      logParams: String = ""
+  ): Future[Either[RepositoryError, T]] =
+    db.run(action)
+      .map { result =>
+        logger.info(
+          s"Successfully completed $logMessage. Parameters: $logParams"
+        )
+        Right(result)
+      }
+      .recover {
+        case ex: java.sql.SQLException =>
+          logger.error(
+            s"A SQL error occurred while $logMessage: ${ex.getMessage}",
+            ex
+          )
+          Left(DatabaseError(ex))
+        case ex: java.util.concurrent.TimeoutException =>
+          logger.error(
+            s"A timeout occurred while $logMessage: ${ex.getMessage}",
+            ex
+          )
+          Left(TimeoutError(ex))
+        case ex: SlickException =>
+          logger.error(
+            s"A database error occurred while $logMessage: ${ex.getMessage}",
+            ex
+          )
+          Left(DatabaseError(ex))
+        case ex: Exception =>
+          logger.error(
+            s"An error occurred while $logMessage: ${ex.getMessage}",
+            ex
+          )
+          Left(UnknownError(ex))
+      }
 
-  /** Creates a new user.
-    *
-    * @param user
-    *   the user to create
-    * @return
-    *   a future that completes with the created user or an error
-    */
   override def createUser(user: User): Future[Either[RepositoryError, User]] = {
-    // Implementation omitted for brevity
+    val action = (for {
+      isTaken <- Users.filter(_.username === user.username).exists.result
+      result <-
+        if (isTaken) {
+          DBIO.successful(Left(UsernameAlreadyExistsError))
+        } else {
+          (Users returning Users.map(_.id) += user).map(id =>
+            Right(user.copy(id = id))
+          )
+        }
+    } yield result).transactionally
+
+    runDbAction(action, "creating a user", s"Username: ${user.username}")
   }
 
-  /** Retrieves a user by ID.
-    *
-    * @param id
-    *   the ID of the user to retrieve
-    * @return
-    *   a future that completes with the user or an error
-    */
-  override def getUser(
-      id: Int
-  ): Future[Either[RepositoryError, Option[User]]] = {
-    // Implementation omitted for brevity
-  }
+  override def getUser(id: Int): Future[Either[RepositoryError, Option[User]]] =
+    runDbAction(
+      Users.filter(_.id === id).result.headOption,
+      "retrieving a user",
+      s"User ID: $id"
+    )
 
-  /** Updates a user.
-    *
-    * @param user
-    *   the user with updated information
-    * @return
-    *   a future that completes with the updated user or an error
-    */
   override def updateUser(user: User): Future[Either[RepositoryError, User]] = {
-    // Implementation omitted for brevity
+    val query = Users
+      .filter(_.id === user.id)
+      .map(u => (u.username, u.password, u.salt, u.email))
+      .update((user.username, user.password, user.salt, user.email))
+
+    runDbAction(query, "updating a user", s"User ID: ${user.id}")
   }
 
-  /** Deletes a user by ID.
-    *
-    * @param id
-    *   the ID of the user to delete
-    * @return
-    *   a future that completes when the user has been deleted or an error
-    */
   override def deleteUser(id: Int): Future[Either[RepositoryError, Unit]] = {
-    // Implementation omitted for brevity
+    val action = (for {
+      userExists <- Users.filter(_.id === id).exists.result
+      result <-
+        if (!userExists) {
+          DBIO.successful(Left(UserNotFoundError))
+        } else {
+          Users.filter(_.id === id).delete.map(_ => Right(()))
+        }
+    } yield result).transactionally
+
+    runDbAction(action, "deleting a user", s"User ID: $id")
   }
 
-  /** Retrieves a user by username.
-    *
-    * @param username
-    *   the username of the user to retrieve
-    * @return
-    *   a future that completes with the user or an error
-    */
   override def getUserByUsername(
       username: String
-  ): Future[Either[RepositoryError, Option[User]]] = {
-    // Implementation omitted for brevity
-  }
+  ): Future[Either[RepositoryError, Option[User]]] =
+    runDbAction(
+      Users.filter(_.username === username).result.headOption,
+      "retrieving a user by username",
+      s"Username: $username"
+    )
 
-  /** Checks if a username is already taken.
-    *
-    * @param username
-    *   the username to check
-    * @return
-    *   a future that completes with true if the username is taken, false
-    *   otherwise, or an error
-    */
   override def isUsernameTaken(
       username: String
-  ): Future[Either[RepositoryError, Boolean]] = {
-    // Implementation omitted for brevity
-  }
+  ): Future[Either[RepositoryError, Boolean]] =
+    runDbAction(
+      Users.filter(_.username === username).exists.result,
+      "checking if a username is taken",
+      s"Username: $username"
+    )
 
-  /** Retrieves all users.
-    *
-    * @return
-    *   a future that completes with a sequence of all users or an error
-    */
-  override def getAllUsers: Future[Either[RepositoryError, Seq[User]]] = {
-    // Implementation omitted for brevity
-  }
+  override def getAllUsers: Future[Either[RepositoryError, Seq[User]]] =
+    runDbAction(Users.result, "retrieving all users")
 
-  /** Handles exceptions and logs errors for a future.
-    *
-    * @param action
-    *   a description of the action being performed
-    * @param future
-    *   the future to handle exceptions for
-    * @return
-    *   a future that completes with the result of the original future or an
-    *   error
-    */
-  private def recoverWithLogging[T](
-      action: String
-  )(future: Future[T]): Future[Either[RepositoryError, T]] = {
-    future.map(Right(_)).recover {
-      case ex: java.sql.SQLException =>
-        logger.error(
-          s"A SQL error occurred while $action: ${ex.getMessage}",
-          ex
-        )
-        Left(DatabaseError(ex))
-      case ex: Exception =>
-        logger.error(s"An error occurred while $action: ${ex.getMessage}", ex)
-        Left(UnknownError(ex))
-    }
+  def verifyPassword(
+      username: String,
+      password: String
+  ): Future[Either[RepositoryError, User]] = {
+    val action = (for {
+      userOption <- Users.filter(_.username === username).result.headOption
+      result <- userOption match {
+        case Some(user) =>
+          if (user.password == SecureHash.createHash(password, user.salt)) {
+            DBIO.successful(Right(user))
+          } else {
+            DBIO.successful(Left(PasswordIncorrectError))
+          }
+        case None => DBIO.successful(Left(UserNotFoundError))
+      }
+    } yield result).transactionally
+
+    runDbAction(action, "verifying a password", s"Username: $username")
   }
 }

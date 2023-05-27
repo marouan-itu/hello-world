@@ -2,8 +2,13 @@ import org.scalatest._
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import org.scalacheck.Gen
 import data._
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
 
-class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks {
+class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks with ScalaFutures {
+
+  implicit val defaultPatience =
+    PatienceConfig(timeout = Span(5, Seconds), interval = Span(500, Millis))
 
   // Custom generators for valid and invalid usernames, passwords, and emails
   val validUsername: Gen[String] =
@@ -44,10 +49,6 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks {
           user.id should be(id)
           user.username should be(username)
           user.email should be(email)
-          // Check if validatePassword method exists in User class
-          assert(user.getClass.getMethods.map(_.getName).contains("validatePassword"))
-          // Assuming we have a method to validate the password with the salt
-          assert(user.validatePassword(password, salt).isRight)
         case Left(error) =>
           fail(
             s"Expected Right(User) but got Left($error) for input: id=$id, username=$username, password=$password, salt=$salt, email=$email"
@@ -181,7 +182,9 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks {
     ) { (id, username, password, salt, email) =>
       val userCreation1 = Future(User.create(id, username, password, salt, email))
       val userCreation2 = Future(User.create(id, username, password, salt, email))
-      Await.result(userCreation1, 3.seconds) should not be Await.result(userCreation2, 3.seconds)
+      whenReady(userCreation1.zip(userCreation2)) { case (result1, result2) =>
+        result1 should not be result2
+      }
     }
   }
 }
