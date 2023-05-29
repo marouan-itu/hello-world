@@ -1,49 +1,61 @@
 package data
 
-import slick.jdbc.PostgresProfile.api._
+import skunk._
+import skunk.implicits._
+import skunk.codec.all._
+import cats.effect.IO
+import cats.syntax.all._
 
-/** Represents the "users" table in the database.
-  *
-  * @param tag
-  *   the tag to use for the table
-  */
-class UserTable(tag: Tag) extends Table[User](tag, "users") {
+class UserTable {
 
-  /** The user's ID column. */
-  def id = column[Int]("id", O.PrimaryKey, O.AutoInc)
+  // Define the codec for the User case class
+  def userCodec: Codec[User] =
+    (int4 ~ varchar ~ varchar ~ varchar ~ varchar).imap {
+      case id ~ username ~ password ~ salt ~ email =>
+        User(id, username, password, salt, email)
+    } { case User(id, username, password, salt, email) =>
+      id ~ username ~ password ~ salt ~ email
+    }
 
-  /** The user's username column. */
-  def username = column[String]("username", O.NotNull)
+  // Define the SQL commands
+  def createUser: Command[User] =
+    sql"""
+      INSERT INTO users (id, username, password, salt, email)
+      VALUES (DEFAULT, $varchar, $varchar, $varchar, $varchar)
+      RETURNING id, username, password, salt, email
+    """.command.gcontramap(userCodec)
 
-  /** The user's password column. */
-  def password = column[String]("password", O.NotNull)
+  def getUser: Query[Int, User] =
+    sql"""
+      SELECT id, username, password, salt, email
+      FROM users
+      WHERE id = $int4
+    """.query(userCodec)
 
-  /** The user's salt column. */
-  def salt = column[String]("salt", O.NotNull)
+  def updateUser: Command[User] =
+    sql"""
+      UPDATE users
+      SET username = $varchar, password = $varchar, salt = $varchar, email = $varchar
+      WHERE id = $int4
+      RETURNING id, username, password, salt, email
+    """.command.gcontramap(userCodec)
 
-  /** The user's email column.s */
-  def email = column[String]("email", O.NotNull)
+  def deleteUser: Command[Int] =
+    sql"""
+      DELETE FROM users
+      WHERE id = $int4
+    """.command
 
-  /** The mapping of the user's data to the table's columns. */
-  def * =
-    (
-      id,
-      username,
-      password,
-      salt,
-      email
-    ) <> ((User.apply _).tupled, User.unapply)
+  def getAllUsers: Query[Void, User] =
+    sql"""
+      SELECT id, username, password, salt, email
+      FROM users
+    """.query(userCodec)
 
-  /** A unique index on the username column. */
-  def usernameIndex = index("idx_username", username, unique = true)
-
-  /** A unique index on the email column. */
-  def emailIndex = index("idx_email", email, unique = true)
-}
-
-/** The companion object for the UserTable class. */
-object UserTable {
-
-  /** The query for the "users" table. */
-  val Users = TableQuery[UserTable]
+  // Error handling
+  def execute[A](io: IO[A]): IO[Either[String, A]] =
+    io.attempt.map {
+      case Left(e)  => Left(e.getMessage)
+      case Right(a) => Right(a)
+    }
 }

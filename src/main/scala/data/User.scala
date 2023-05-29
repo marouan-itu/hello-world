@@ -1,66 +1,38 @@
 package data
 
 import org.apache.commons.validator.routines.EmailValidator
-import scala.concurrent.Future
-import io.github.nremond.SecureHash
+import scala.util.Try
 import java.security.SecureRandom
+import java.util.Base64
+import io.github.nremond.SecureHash
 
-/** Represents a validation error for a user's data. */
 sealed trait ValidationError
 case object InvalidUsername extends ValidationError
 case object InvalidPassword extends ValidationError
 case object InvalidEmail extends ValidationError
+case object HashingError extends ValidationError
 
-/** Represents a user.
-  *
-  * @param id
-  *   the user's ID
-  * @param username
-  *   the user's username
-  * @param password
-  *   the user's password (private)
-  * @param email
-  *   the user's email
-  */
-class User private (
-    val id: Int,
-    val username: String,
-    private val password: String,
-    val email: String
+case class User private (
+    id: Int,
+    username: String,
+    password: String,
+    email: String,
+    salt: String
 ) {
-  override def toString: String = s"User($id, $username, ****, $email)"
+  override def toString: String = s"User($id, $username, ****, $email, ****)"
 
-  /** Verifies if the provided password matches the user's password.
-    *
-    * @param password
-    *   the password to verify
-    * @return
-    *   true if the password is correct, false otherwise
-    */
-  def verifyPassword(password: String): Boolean =
-    SecureHash.validatePassword(password, this.password)
+  def verifyPassword(password: String): Boolean = {
+    val hashedPassword = SecureHash.createHash(password + this.salt)
+    this.password == hashedPassword
+  }
 }
 
 object User {
   private val emailValidator = EmailValidator.getInstance()
 
-  /** Checks if a username is valid.
-    *
-    * @param username
-    *   the username to check
-    * @return
-    *   true if the username is valid, false otherwise
-    */
   def isValidUsername(username: String): Boolean =
     username.nonEmpty && username.length >= 3
 
-  /** Checks if a password is valid.
-    *
-    * @param password
-    *   the password to check
-    * @return
-    *   true if the password is valid, false otherwise
-    */
   def isValidPassword(password: String): Boolean =
     password.nonEmpty &&
       password.length >= 8 &&
@@ -69,36 +41,15 @@ object User {
       password.exists(_.isDigit) &&
       password.exists(!_.isLetterOrDigit)
 
-  /** Checks if an email is valid.
-    *
-    * @param email
-    *   the email to check
-    * @return
-    *   true if the email is valid, false otherwise
-    */
   def isValidEmail(email: String): Boolean =
     emailValidator.isValid(email)
 
-  /** Creates a new user.
-    *
-    * @param id
-    *   the user's ID
-    * @param username
-    *   the user's username
-    * @param password
-    *   the user's password
-    * @param email
-    *   the user's email
-    * @return
-    *   a Future that either contains the created user, or a validation error if
-    *   the user's data is invalid
-    */
   def create(
       id: Int,
       username: String,
       password: String,
       email: String
-  ): Future[Either[ValidationError, User]] = Future {
+  ): Try[Either[ValidationError, User]] = Try {
     if (!isValidUsername(username)) {
       Left(InvalidUsername)
     } else if (!isValidPassword(password)) {
@@ -107,8 +58,12 @@ object User {
       Left(InvalidEmail)
     } else {
       val salt = generateSalt()
-      val hashedPassword = SecureHash.createHash(password, salt)
-      Right(new User(id, username, hashedPassword, email))
+      val hashedPassword = Try(SecureHash.createHash(password + salt))
+      hashedPassword match {
+        case scala.util.Success(hashed) =>
+          Right(User(id, username, hashed, email, salt))
+        case scala.util.Failure(_) => Left(HashingError)
+      }
     }
   }
 
@@ -116,6 +71,6 @@ object User {
     val random = new SecureRandom()
     val bytes = new Array[Byte](64)
     random.nextBytes(bytes)
-    bytes.map("%02x".format(_)).mkString
+    Base64.getEncoder.encodeToString(bytes)
   }
 }

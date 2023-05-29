@@ -1,12 +1,15 @@
 package data
 
 import cats.effect.{IO, Resource}
+import cats.data.EitherT
 import skunk.{Session, Command, Query, ~}
 import skunk.implicits._
 import skunk.codec.all._
 import natchez.Trace.Implicits.noop
 import com.typesafe.scalalogging.LazyLogging
 import io.github.nremond.SecureHash
+import java.security.MessageDigest
+import java.nio.charset.StandardCharsets
 
 class PostgresUserRepository(sessionPool: Resource[IO, Session[IO]])
     extends UserRepository
@@ -63,139 +66,155 @@ class PostgresUserRepository(sessionPool: Resource[IO, Session[IO]])
     """.command
 
   override def createUser(user: User): IO[Either[RepositoryError, User]] = {
-    sessionPool.use { session =>
-      session.prepare(usernameExists).use { query =>
-        query.unique(user.username).flatMap { exists =>
-          if (exists) {
-            IO.pure(Left(UsernameAlreadyExistsError))
-          } else {
-            session.prepare(insertUser).use { cmd =>
-              cmd.execute(user).attempt.map {
-                case Left(e) =>
-                  logger.error(s"Error creating a user: ${e.getMessage}", e)
-                  Left(DatabaseError(e))
-                case Right(_) =>
-                  logger.info(s"Successfully created user: ${user.username}")
-                  Right(user)
-              }
-            }
+    logger.debug(s"Attempting to create user: ${user.username}")
+    val action = for {
+      result <- EitherT
+        .right(sessionPool.use { session =>
+          session.prepare(insertUser).use { cmd =>
+            cmd.execute(user)
           }
+        })
+        .leftMap {
+          case e: skunk.exception.PostgresErrorException
+              if e.message.contains("unique constraint") =>
+            UsernameAlreadyExistsError
+          case e => DatabaseError(e)
         }
-      }
-    }
+    } yield result
+
+    action.value
   }
 
   override def getUser(id: Int): IO[Either[RepositoryError, Option[User]]] = {
-    sessionPool.use { session =>
-      session.prepare(selectUserById).use { query =>
-        query.option(id).attempt.map {
-          case Left(e) =>
-            logger.error(s"Error retrieving a user: ${e.getMessage}", e)
-            Left(DatabaseError(e))
-          case Right(userOption) =>
-            logger.info(s"Successfully retrieved user: $id")
-            Right(userOption)
-        }
-      }
-    }
+    logger.debug(s"Attempting to retrieve user with id: $id")
+    val action = for {
+      userOption <- EitherT
+        .right(sessionPool.use { session =>
+          session.prepare(selectUserById).use { query =>
+            query.option(id)
+          }
+        })
+        .leftMap(e => DatabaseError(e))
+    } yield userOption
+
+    action.value
   }
 
   override def updateUser(user: User): IO[Either[RepositoryError, User]] = {
-    sessionPool.use { session =>
-      session.prepare(updateUser).use { cmd =>
-        cmd.execute(user).attempt.map {
-          case Left(e) =>
-            logger.error(s"Error updating a user: ${e.getMessage}", e)
-            Left(DatabaseError(e))
-          case Right(_) =>
-            logger.info(s"Successfully updated user: ${user.username}")
-            Right(user)
+    logger.debug(s"Attempting to update user: ${user.username}")
+    val action = for {
+      result <- EitherT
+        .right(sessionPool.use { session =>
+          session.prepare(updateUser).use { cmd =>
+            cmd.execute(user)
+          }
+        })
+        .leftMap {
+          case e: skunk.exception.PostgresErrorException
+              if e.message.contains("does not exist") =>
+            UserNotFoundError
+          case e => DatabaseError(e)
         }
-      }
-    }
+    } yield result
+
+    action.value
   }
 
   override def deleteUser(id: Int): IO[Either[RepositoryError, Unit]] = {
-    sessionPool.use { session =>
-      session.prepare(selectUserById).use { query =>
-        query.option(id).flatMap { userOption =>
-          userOption match {
-            case Some(_) =>
-              session.prepare(deleteUser).use { cmd =>
-                cmd.execute(id).attempt.map {
-                  case Left(e) =>
-                    logger.error(s"Error deleting a user: ${e.getMessage}", e)
-                    Left(DatabaseError(e))
-                  case Right(_) =>
-                    logger.info(s"Successfully deleted user: $id")
-                    Right(())
-                }
-              }
-            case None => IO.pure(Left(UserNotFoundError))
+    logger.debug(s"Attempting to delete user with id: $id")
+    val action = for {
+      result <- EitherT
+        .right(sessionPool.use { session =>
+          session.prepare(deleteUser).use { cmd =>
+            cmd.execute(id)
           }
+        })
+        .leftMap {
+          case e: skunk.exception.PostgresErrorException
+              if e.message.contains("does not exist") =>
+            UserNotFoundError
+          case e => DatabaseError(e)
         }
-      }
-    }
+    } yield result
+
+    action.value
   }
 
-  override def getUserByUsername(username: String): IO[Either[RepositoryError, Option[User]]] = {
-    sessionPool.use { session =>
-      session.prepare(selectUser).use { query =>
-        query.option(username).attempt.map {
-          case Left(e) =>
-            logger.error(s"Error retrieving a user by username: ${e.getMessage}", e)
-            Left(DatabaseError(e))
-          case Right(userOption) =>
-            logger.info(s"Successfully retrieved user by username: $username")
-            Right(userOption)
-        }
-      }
-    }
+  override def getUserByUsername(
+      username: String
+  ): IO[Either[RepositoryError, Option[User]]] = {
+    logger.debug(s"Attempting to retrieve user by username: $username")
+    val action = for {
+      userOption <- EitherT
+        .right(sessionPool.use { session =>
+          session.prepare(selectUser).use { query =>
+            query.option(username)
+          }
+        })
+        .leftMap(e => DatabaseError(e))
+    } yield userOption
+
+    action.value
   }
 
-  override def isUsernameTaken(username: String): IO[Either[RepositoryError, Boolean]] = {
-    sessionPool.use { session =>
-      session.prepare(usernameExists).use { query =>
-        query.unique(username).attempt.map {
-          case Left(e) =>
-            logger.error(s"Error checking if a username is taken: ${e.getMessage}", e)
-            Left(DatabaseError(e))
-          case Right(isTaken) =>
-            logger.info(s"Username check complete for: $username")
-            Right(isTaken)
-        }
-      }
-    }
+  override def isUsernameTaken(
+      username: String
+  ): IO[Either[RepositoryError, Boolean]] = {
+    logger.debug(s"Checking if username is taken: $username")
+    val action = for {
+      isTaken <- EitherT
+        .right(sessionPool.use { session =>
+          session.prepare(usernameExists).use { query =>
+            query.unique(username)
+          }
+        })
+        .leftMap(e => DatabaseError(e))
+    } yield isTaken
+
+    action.value
   }
 
   override def getAllUsers: IO[Either[RepositoryError, Seq[User]]] = {
-    sessionPool.use { session =>
-      session.prepare(selectAllUsers).use { query =>
-        query.stream(Void, 64).compile.toList.attempt.map {
-          case Left(e) =>
-            logger.error(s"Error retrieving all users: ${e.getMessage}", e)
-            Left(DatabaseError(e))
-          case Right(users) =>
-            logger.info(s"Successfully retrieved all users")
-            Right(users)
-        }
-      }
-    }
+    logger.debug("Attempting to retrieve all users")
+    val action = for {
+      users <- EitherT
+        .right(sessionPool.use { session =>
+          session.prepare(selectAllUsers).use { query =>
+            query.stream(Void, 64).compile.toList
+          }
+        })
+        .leftMap(e => DatabaseError(e))
+    } yield users
+
+    action.value
   }
 
-  override def verifyPassword(username: String, password: String): IO[Either[RepositoryError, User]] = {
-    sessionPool.use { session =>
-      session.prepare(selectUser).use { query =>
-        query.option(username).map {
-          case Some(user) =>
-            if (user.password == SecureHash.createHash(password, user.salt)) {
-              Right(user)
-            } else {
-              Left(PasswordIncorrectError)
-            }
-          case None => Left(UserNotFoundError)
+  override def verifyPassword(
+      username: String,
+      password: String
+  ): IO[Either[RepositoryError, User]] = {
+    sessionPool
+      .use { session =>
+        session.prepare(selectUser).use { query =>
+          query.option(username).map {
+            case Some(user) =>
+              val hashedPassword = SecureHash.createHash(password + user.salt)
+              if (
+                MessageDigest.isEqual(
+                  hashedPassword.getBytes(StandardCharsets.UTF_8),
+                  user.password.getBytes(StandardCharsets.UTF_8)
+                )
+              ) {
+                Right(user)
+              } else {
+                Left(PasswordIncorrectError)
+              }
+            case None => Left(UserNotFoundError)
+          }
         }
       }
-    }
+      .handleErrorWith { case e: Throwable =>
+        IO.pure(Left(DatabaseError(e)))
+      }
   }
 }

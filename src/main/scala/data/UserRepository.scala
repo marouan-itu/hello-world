@@ -1,100 +1,62 @@
 package data
 
-import scala.concurrent.Future
+import cats.data.EitherT
+import cats.effect.IO
 
-/** Repository for performing operations on users.
-  */
 trait UserRepository {
 
-  /** A type alias for a Future that either contains a value of type T or a
-    * RepositoryError.
-    */
-  type Result[T] = Future[Either[RepositoryError, T]]
+  def createUser(
+      username: String,
+      password: String,
+      email: String
+  ): EitherT[IO, RepositoryError, User]
 
-  /** Creates a new user.
-    *
-    * @param user
-    *   The user to create.
-    * @return
-    *   A Future that either contains the created user with the ID set, or a
-    *   RepositoryError if the operation failed.
-    */
-  def createUser(user: User): Result[User]
+  def getUser(id: Int): EitherT[IO, RepositoryError, Option[User]]
 
-  /** Retrieves a user by ID.
-    *
-    * @param id
-    *   The ID of the user to retrieve.
-    * @return
-    *   A Future that either contains the user if found, None if not found, or a
-    *   RepositoryError if the operation failed.
-    */
-  def getUser(id: Int): Result[Option[User]]
+  def getUserByUsername(
+      username: String
+  ): EitherT[IO, RepositoryError, Option[User]]
 
-  /** Retrieves a user by username.
-    *
-    * @param username
-    *   The username of the user to retrieve.
-    * @return
-    *   A Future that either contains the user if found, None if not found, or a
-    *   RepositoryError if the operation failed.
-    */
-  def getUserByUsername(username: String): Result[Option[User]]
+  def isUsernameTaken(
+      username: String
+  ): EitherT[IO, RepositoryError, Boolean]
 
-  /** Checks if a username is already taken.
-    *
-    * @param username
-    *   The username to check.
-    * @return
-    *   A Future that either contains true if the username is taken, false if
-    *   not, or a RepositoryError if the operation failed.
-    */
-  def isUsernameTaken(username: String): Result[Boolean]
+  def getAllUsers(
+      page: Int,
+      pageSize: Int
+  ): EitherT[IO, RepositoryError, Seq[User]]
 
-  /** Retrieves all users.
-    *
-    * @return
-    *   A Future that either contains a sequence of all users, or a
-    *   RepositoryError if the operation failed.
-    */
-  def getAllUsers: Result[Seq[User]]
+  def updateUser(
+      id: Int,
+      username: Option[String],
+      password: Option[String],
+      email: Option[String]
+  ): EitherT[IO, RepositoryError, User]
 
-  /** Updates a user.
-    *
-    * @param user
-    *   The user with updated information.
-    * @return
-    *   A Future that either contains the updated user, or a RepositoryError if
-    *   the operation failed.
-    */
-  def updateUser(user: User): Result[User]
+  def deleteUser(id: Int): EitherT[IO, RepositoryError, Unit]
 
-  /** Deletes a user by ID.
-    *
-    * @param id
-    *   The ID of the user to delete.
-    * @return
-    *   A Future that completes when the user has been deleted, or a
-    *   RepositoryError if the operation failed.
-    */
-  def deleteUser(id: Int): Result[Unit]
+  def changeUserPassword(
+      id: Int,
+      oldPassword: String,
+      newPassword: String
+  ): EitherT[IO, RepositoryError, Unit]
+
+  def verifyUserCredentials(
+      username: String,
+      password: String
+  ): EitherT[IO, RepositoryError, User]
 }
 
-/** A sealed trait representing possible errors that can occur in the
-  * repository.
-  */
-sealed trait RepositoryError
+sealed trait RepositoryError extends Throwable
 
-/** A case class representing a database error. Contains a message describing
-  * the error.
-  */
 case class DatabaseError(message: String) extends RepositoryError
 
-/** A case object representing an error where a user was not found. */
 case object UserNotFound extends RepositoryError
 
-/** A case object representing an error where a username is already taken. */
 case object UsernameTaken extends RepositoryError
 
-/** A case object representing an error where an email is already taken. */
 case object EmailTaken extends RepositoryError
+
+case object InvalidCredentials extends RepositoryError
+
+case object NoUpdateParametersProvided extends RepositoryError

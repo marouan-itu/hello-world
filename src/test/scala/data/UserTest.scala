@@ -41,18 +41,19 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks with
       Gen.posNum[Int],
       validUsername,
       validPassword,
-      Gen.alphaStr,
       validEmail
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email) match {
-        case Right(user) =>
+    ) { (id, username, password, email) =>
+      User.create(id, username, password, email) match {
+        case scala.util.Success(Right(user)) =>
           user.id should be(id)
           user.username should be(username)
           user.email should be(email)
-        case Left(error) =>
+        case scala.util.Success(Left(error)) =>
           fail(
-            s"Expected Right(User) but got Left($error) for input: id=$id, username=$username, password=$password, salt=$salt, email=$email"
+            s"Expected Right(User) but got Left($error) for input: id=$id, username=$username, password=$password, email=$email"
           )
+        case scala.util.Failure(_) =>
+          fail("Hashing error occurred during user creation")
       }
     }
   }
@@ -62,11 +63,10 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks with
       Gen.posNum[Int],
       invalidUsername,
       validPassword,
-      Gen.alphaStr,
       validEmail
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email) should be(
-        Left(InvalidUsername)
+    ) { (id, username, password, email) =>
+      User.create(id, username, password, email) should be(
+        scala.util.Success(Left(InvalidUsername))
       )
     }
   }
@@ -76,11 +76,10 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks with
       Gen.posNum[Int],
       validUsername,
       invalidPassword,
-      Gen.alphaStr,
       validEmail
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email) should be(
-        Left(InvalidPassword)
+    ) { (id, username, password, email) =>
+      User.create(id, username, password, email) should be(
+        scala.util.Success(Left(InvalidPassword))
       )
     }
   }
@@ -90,11 +89,10 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks with
       Gen.posNum[Int],
       validUsername,
       validPassword,
-      Gen.alphaStr,
       invalidEmail
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email) should be(
-        Left(InvalidEmail)
+    ) { (id, username, password, email) =>
+      User.create(id, username, password, email) should be(
+        scala.util.Success(Left(InvalidEmail))
       )
     }
   }
@@ -104,11 +102,10 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks with
       Gen.posNum[Int],
       Gen.const(""),
       validPassword,
-      Gen.alphaStr,
       validEmail
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email) should be(
-        Left(InvalidUsername)
+    ) { (id, username, password, email) =>
+      User.create(id, username, password, email) should be(
+        scala.util.Success(Left(InvalidUsername))
       )
     }
   }
@@ -118,11 +115,10 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks with
       Gen.posNum[Int],
       validUsername,
       Gen.const(""),
-      Gen.alphaStr,
       validEmail
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email) should be(
-        Left(InvalidPassword)
+    ) { (id, username, password, email) =>
+      User.create(id, username, password, email) should be(
+        scala.util.Success(Left(InvalidPassword))
       )
     }
   }
@@ -132,59 +128,25 @@ class UserSpec extends FlatSpec with Matchers with ScalaCheckPropertyChecks with
       Gen.posNum[Int],
       validUsername,
       validPassword,
-      Gen.alphaStr,
       Gen.const("")
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email) should be(
-        Left(InvalidEmail)
+    ) { (id, username, password, email) =>
+      User.create(id, username, password, email) should be(
+        scala.util.Success(Left(InvalidEmail))
       )
     }
   }
 
-  // Additional test cases
-  it should "return UserAlreadyExists when user with the same ID already exists" in {
-    // Assuming we have a method to check if a user already exists
-    forAll(
-      Gen.posNum[Int],
-      validUsername,
-      validPassword,
-      Gen.alphaStr,
-      validEmail
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email)
-      User.create(id, username, password, salt, email) should be(
-        Left(UserAlreadyExists)
-      )
-    }
-  }
-
-  it should "return an exception when an error occurs during user creation" in {
+  it should "return HashingError when an error occurs during user creation" in {
     // Assuming we have a method to simulate an error during user creation
     forAll(
       Gen.posNum[Int],
       validUsername,
       validPassword,
-      Gen.alphaStr,
       validEmail
-    ) { (id, username, password, salt, email) =>
-      User.create(id, username, password, salt, email) should be a 'failure
-    }
-  }
-
-  it should "handle concurrent user creation" in {
-    // Assuming we have a method to simulate concurrent user creation
-    forAll(
-      Gen.posNum[Int],
-      validUsername,
-      validPassword,
-      Gen.alphaStr,
-      validEmail
-    ) { (id, username, password, salt, email) =>
-      val userCreation1 = Future(User.create(id, username, password, salt, email))
-      val userCreation2 = Future(User.create(id, username, password, salt, email))
-      whenReady(userCreation1.zip(userCreation2)) { case (result1, result2) =>
-        result1 should not be result2
-      }
+    ) { (id, username, password, email) =>
+      // Simulate a hashing error
+      when(SecureHash.createHash(any[String])).thenThrow(new RuntimeException("Simulated hashing error"))
+      User.create(id, username, password, email) should be a 'failure
     }
   }
 }
